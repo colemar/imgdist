@@ -40,8 +40,8 @@ The installation command for PyTorch depends on your system and whether you have
 
 [Visit the PyTorch "Get Started" page](https://pytorch.org/get-started/locally/)
 
-For example, the command to install PyTorch with support for CUDA 11.8 is:
+For example, NVIDIA GeForce GTX 1080 Ti supports CUDA Version 13.0 and the command to install PyTorch is:
 ```bash
-pip install torch --index-url https://download.pytorch.org/whl/cu118
+pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu129
 ```
 
