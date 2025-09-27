@@ -25,7 +25,7 @@ It also computes:
 ### Options
 * `-s`, `--ssim`: Calculate SSIM score.
 * `-m`, `--ms_ssim`: Calculate MS-SSIM score.
-* `-g`, `--gpu`: Use GPU for SSIM/MS-SSIM calculations (requires PyTorch with CUDA).
+* `-g`, `--gpu`: Use GPU for SSIM/MS-SSIM calculations
 
 ## Prerequisites
 
