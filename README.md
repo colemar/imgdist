@@ -25,3 +25,23 @@ It also computes:
 * `-m`, `--ms_ssim`: Calculate MS-SSIM score.
 * `-g`, `--gpu`: Use GPU for SSIM/MS-SSIM calculations (requires PyTorch with CUDA).
 
+## Prerequisites
+
+This script requires Python 3 and the following libraries.
+
+You can install most of the dependencies using pip:
+```bash
+pip install numpy Pillow pytorch-msssim
+```
+
+### PyTorch
+
+The installation command for PyTorch depends on your system and whether you have GPU (CUDA) support. It is highly recommended to use the official command generator on the PyTorch website to get the correct version for your setup.
+
+[Visit the PyTorch "Get Started" page](https://pytorch.org/get-started/locally/)
+
+For example, the command to install PyTorch with support for CUDA 11.8 is:
+```bash
+pip install torch --index-url https://download.pytorch.org/whl/cu118
+```
+
