@@ -15,10 +15,12 @@ def compute_diffs(picture1_path, picture2_path, compute_ssim=False, compute_ms_s
         if picture1.size != picture2.size:
             return "Error: pictures must have the same width and height."
 
-        pixel_count = np.prod(picture1.size)
+        width, height = picture1.size
+        pixel_count = width * height
 
         # The dictionary is initialized empty and populated gradually
         results = {}
+        results["size"] = f"{width} x {height}"
 
         # --- CALCULATION OF NORMALIZED EUCLIDEAN NORM FOR YCbCr ---
 
@@ -137,6 +139,8 @@ if __name__ == "__main__":
 
     # Check if the result is a dictionary (success)
     if isinstance(results, dict):
+        print(f"\nImages size: {results['size']}")
+
         # Print YcbCr Euclidean norm results
         norms = results["ycbcr"]
         print( "\n----------- YCbCr ------------")
