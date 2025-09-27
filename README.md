@@ -18,14 +18,31 @@ It also computes:
 
 ## Usage
 
+Linux:
+
 ```bash
 ./imgdist.py [image1] [image2] [options]
+```
+
+Windows:
+
+```batch
+py imgdist.py [image1] [image2] [options]
+```
+
+Or set file extension association once for Windows:
+
+```batch
+assoc .py=Python.File
+ftype Python.File="C:\WINDOWS\py.exe" "%L" %*
+
+imgdist.py [image1] [image2] [options]
 ```
 
 ### Options
 * `-s`, `--ssim`: Calculate SSIM score.
 * `-m`, `--ms_ssim`: Calculate MS-SSIM score.
-* `-g`, `--gpu`: Use GPU for SSIM/MS-SSIM calculations (requires PyTorch with CUDA).
+* `-g`, `--gpu`: Use GPU for SSIM/MS-SSIM calculations
 
 ## Prerequisites
 
