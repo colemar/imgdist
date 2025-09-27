@@ -2,7 +2,7 @@
 
 A command-line tool to calculate and compare various perceptual distance metrics between two images.
 
-<img width="487" height="497" alt="image" src="https://github.com/user-attachments/assets/d9fc5717-05e0-4d84-baf6-99451b8c0557" />
+![Usage screenshot](images/screen.png)
 
 ## Features
 
