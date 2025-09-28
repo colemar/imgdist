@@ -35,6 +35,7 @@ Or set file extension association once for Windows:
 ```batch
 assoc .py=Python.File
 ftype Python.File="C:\WINDOWS\py.exe" "%L" %*
+REM Skip commands above if the command below already works
 
 imgdist.py [image1] [image2] [options]
 ```
