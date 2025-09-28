@@ -1,182 +1,194 @@
 #!/usr/bin/env python3
 
+import traceback
 import sys
 from PIL import Image
 import numpy as np
 import torch
 from pytorch_msssim import ssim, ms_ssim
 import argparse
+import os
 
-def compute_diffs(picture1_path, picture2_path, compute_ssim=False, compute_ms_ssim=False, use_gpu=False):
+def preprocess_image(image_path, needs_tensors=False, device=torch.device('cpu')):
+    """
+    Loads an image and converts it into all necessary formats (NumPy arrays and PyTorch tensors).
+    This avoids redundant conversions.
+    """
+    img_pil = Image.open(image_path).convert('RGB')
+
+    data_pack = {
+        "path": image_path,
+        "filename": os.path.basename(image_path), # Store just the filename
+        "size": img_pil.size,
+        "ycbcr_arr": np.array(img_pil.convert('YCbCr'), dtype=np.float64),
+        "hsv_arr": np.array(img_pil.convert('HSV'), dtype=np.float64),
+        "lab_arr": np.array(img_pil.convert('LAB'), dtype=np.float64),
+    }
+
+    if needs_tensors:
+        gray_float = np.array(img_pil.convert('L'), dtype=np.float32) / 255.0
+        data_pack["tensor"] = torch.from_numpy(gray_float).unsqueeze(0).unsqueeze(0).to(device)
+
+    return data_pack
+
+def compare_images(pack1, pack2, compute_ssim=False, compute_ms_ssim=False):
+    """
+    Calculates difference metrics between two preprocessed image data packs.
+    """
     try:
-        picture1 = Image.open(picture1_path).convert('RGB')
-        picture2 = Image.open(picture2_path).convert('RGB')
-
-        if picture1.size != picture2.size:
-            return "Error: pictures must have the same width and height."
-
-        width, height = picture1.size
+        width, height = pack1["size"]
         pixel_count = width * height
+        results = {"size": f"{width} x {height}"}
 
-        # The dictionary is initialized empty and populated gradually
-        results = {}
-        results["size"] = f"{width} x {height}"
-
-        # --- CALCULATION OF NORMALIZED EUCLIDEAN NORM FOR YCbCr ---
-
-        # Convert the images to YCbCr and calculate the difference on the entire 3D array
-        diff = np.array(picture1.convert('YCbCr'), dtype=np.float64) - np.array(picture2.convert('YCbCr'), dtype=np.float64)
-
-        # Calculate the 3 norms at once by collapsing axes 0 and 1
+        # --- YCbCr NORM ---
+        diff = pack1["ycbcr_arr"] - pack2["ycbcr_arr"]
         norms = np.linalg.norm(diff, axis=(0, 1))
-
-        # Define the maximum differences per channel and calculate the maximum norms
-        max_diffs = np.array([235.0 - 16.0, 240.0 - 16.0, 240.0 - 16.0], dtype=np.float64) # Y, Cb, Cr
+        max_diffs = np.array([219.0, 224.0, 224.0], dtype=np.float64)
         max_norms = np.sqrt(pixel_count) * max_diffs
-
-        # Normalize the norms with a vector division
         results["ycbcr"] = norms / max_norms
 
-        # --- CALCULATION OF NORMALIZED EUCLIDEAN NORM FOR HSV ---
-
-        # Convert the images to NumPy arrays. Pillow uses uint8 [0, 255] for HSV.
-        # Calculate the absolute difference for all channels at once.
-        diff = np.abs(np.array(picture1.convert('HSV'), dtype=np.float64) - np.array(picture2.convert('HSV'), dtype=np.float64))
-
+        # --- HSV NORM ---
+        diff = np.abs(pack1["hsv_arr"] - pack2["hsv_arr"])
         # Specific correction for the H channel (Hue, index 0), which is circular.
-        # Replace the H difference with its minimum distance on the ring.
         diff[..., 0] = np.minimum(diff[..., 0], 255 - diff[..., 0])
-
-        # Calculate the 3 norms (H, S, V) at once by collapsing the image axes (0 and 1).
         norms = np.linalg.norm(diff, axis=(0, 1))
-
-        # Define the maximum differences per channel (H is ~127.5, S and V are 255).
         max_diffs = np.array([127.5, 255.0, 255.0], dtype=np.float64)
         max_norms = np.sqrt(pixel_count) * max_diffs
-
-        # Normalize the norms with a vector division
         results["hsv"] = norms / max_norms
 
-        # --- CALCULATION OF NORMALIZED EUCLIDEAN NORM FOR LAB ---
-
-        # Convert the images to LAB and calculate the difference on the entire 3D array
-        diff = np.array(picture1.convert('LAB'), dtype=np.float64) - np.array(picture2.convert('LAB'), dtype=np.float64)
-
-        # Calculate the 3 norms at once by collapsing axes 0 and 1
-        norms = np.linalg.norm(diff, axis=(0, 1))
-
-        # Define the maximum differences per channel and calculate the maximum norms.
-        # For LAB, all channels use the full 0-255 range.
-        max_diffs = np.array([255.0, 255.0, 255.0], dtype=np.float64) # L, a, b
+        # --- LAB NORM & MDE ---
+        diff_lab = pack1["lab_arr"] - pack2["lab_arr"]
+        norms = np.linalg.norm(diff_lab, axis=(0, 1))
+        max_diffs = np.array([255.0, 255.0, 255.0], dtype=np.float64)
         max_norms = np.sqrt(pixel_count) * max_diffs
-
-        # Normalize the norms with a vector division
         results["lab"] = norms / max_norms
 
-        # --- CALCULATION OF NORMALIZED MEAN DELTA E (MDE) ---
-
-        # Calculate the Euclidean norm (Delta E) for each pixel along the channel axis (axis=2)
-        pixel_delta_e = np.linalg.norm(diff, axis=2) # use LAB diff
-
-        # Calculate the mean of all Delta E values to get the MDE.
+        pixel_delta_e = np.linalg.norm(diff_lab, axis=2)
         mean_delta_e = np.mean(pixel_delta_e)
-
-        # Define the maximum theoretical Delta E possible.
         max_delta_e = 255.0 * np.sqrt(3)
-
-        # Normalize the MDE to bring it into the 0-1 range.
         results["mde"] = mean_delta_e / max_delta_e
 
+        # --- SSIM & MS-SSIM ---
+        # Calculate score (the result is a tensor, we use .item() to extract the value)
+        if compute_ssim:
+            results["ssim"] = ssim(pack1["tensor"], pack2["tensor"], data_range=1.0).item()
+        if compute_ms_ssim:
+            results["ms_ssim"] = ms_ssim(pack1["tensor"], pack2["tensor"], data_range=1.0).item()
 
-        # Convert to grayscale only if necessary for SSIM or MS-SSIM
-        if compute_ssim or compute_ms_ssim:
-            # Convert the images to float arrays [0, 1], the format required by pytorch-msssim
-            gray1_float = np.array(picture1.convert('L'), dtype=np.float32) / 255.0
-            gray2_float = np.array(picture2.convert('L'), dtype=np.float32) / 255.0
-
-            # Determine the device to use based on the --gpu flag
-            if use_gpu and torch.cuda.is_available():
-                device = torch.device('cuda')
-            else:
-                device = torch.device('cpu')
-
-            # Convert to PyTorch tensors (adding the Batch and Channel dimensions)
-            t1 = torch.from_numpy(gray1_float).unsqueeze(0).unsqueeze(0).to(device)
-            t2 = torch.from_numpy(gray2_float).unsqueeze(0).unsqueeze(0).to(device)
-
-            # Conditional SSIM calculation
-            if compute_ssim:
-                # Calculate SSIM score (the result is a tensor, we use .item() to extract the value)
-                results["ssim"] = ssim(t1, t2, data_range=1.0).item()
-
-            # Conditional MS-SSIM calculation
-            if compute_ms_ssim:
-                # Calculate MS-SSIM score (the result is a tensor, we use .item() to extract the value)
-                results["ms_ssim"] = ms_ssim(t1, t2, data_range=1.0).item()
-
-        # Return the dictionary
         return results
-
-    except FileNotFoundError:
-        return "Error: One or both files could not be found."
     except Exception as e:
-        return f"Error: {e}"
+        return f"Error during calculation: {e}"
 
-# --- Argument handling and conditional printing ---
-if __name__ == "__main__":
-    # argparse setup for parameter handling
-    parser = argparse.ArgumentParser(description="Calculate various distance metrics between two images.")
-    parser.add_argument("picture1", help="Path to the first image.")
-    parser.add_argument("picture2", help="Path to the second image.")
-    parser.add_argument("-s", "--ssim", action="store_true", help="Also calculate the SSIM index (requires torch).")
-    parser.add_argument("-m", "--ms_ssim", action="store_true", help="Also calculate the MS-SSIM index (requires torch).")
-    parser.add_argument("-g", "--gpu", action="store_true", help="Enable GPU for PyTorch calculations, if available.")    
+def print_comparison_columns(r1, r2, headers):
+    """Prints two result dictionaries in a side-by-side column format."""
+    COL_WIDTH = 30
+    SEPARATOR = " | "
+    TOTAL_WIDTH = COL_WIDTH * 2 + len(SEPARATOR)
+
+    y1, h1, l1, m1, s1, ms1 = r1["ycbcr"], r1["hsv"], r1["lab"], r1["mde"], r1.get("ssim"), r1.get("ms_ssim")
+    ay1, ah1, al1 = [sum(d)/3 for d in [y1, h1, l1]]
+    if isinstance(r2, dict):
+        y2, h2, l2, m2, s2, ms2 = r2["ycbcr"], r2["hsv"], r2["lab"], r2["mde"], r2.get("ssim"), r2.get("ms_ssim")
+        ay2, ah2, al2 = [sum(d)/3 for d in [y2, h2, l2]]
+    else:
+        SEPARATOR = ""
+        TOTAL_WIDTH = COL_WIDTH
+        y2, h2, l2, m2, s2, ms2, ay2, ah2, al2 = ([None,None,None],) * 3 + (None,) * 6
+
+    def fne(v):
+        """If v is a number return it as formatted string, else return empty string"""
+        if isinstance(v, (int, float)):
+            return format(v, '.6f')
+        return ""
+
+    def vert_separator(label):
+        label = f" {label} "
+        left, r = divmod(TOTAL_WIDTH - len(label), 2)
+        right = left + r
+        print("-"*left + label + "-"*right)
+        
+    def data_line(left_str, right_str):
+        print(f"{left_str:<{COL_WIDTH}}{SEPARATOR}{right_str}")
+
+    ref_header, hd1, hd2 = headers
+    print("\n" + f"Ref: {ref_header} {r1['size']}".center(TOTAL_WIDTH))
+    print("="*TOTAL_WIDTH)
+    print(f"{hd1.center(COL_WIDTH)}{SEPARATOR}{hd2.center(COL_WIDTH)}")
+
+    # YCbCr
+    vert_separator("YCbCr")
+    data_line(f"Euclidean distance Y: {fne(y1[0])}", f"{fne(y2[0])}")
+    data_line(f"                  Cb: {fne(y1[1])}", f"{fne(y2[1])}")
+    data_line(f"                  Cr: {fne(y1[2])}", f"{fne(y2[2])}")
+    data_line(f"    Average distance: {fne(ay1)}",   f"{fne(ay2)}"  )
+
+    # HSV
+    vert_separator("HSV")
+    data_line(f"Euclidean distance V: {fne(h1[2])}", f"{fne(h2[2])}")
+    data_line(f"                   S: {fne(h1[1])}", f"{fne(h2[1])}")
+    data_line(f"                   H: {fne(h1[0])}", f"{fne(h2[0])}")
+    data_line(f"    Average distance: {fne(ah1)}",   f"{fne(ah2)}"  )
+
+    # LAB
+    vert_separator("LAB")
+    data_line(f"Euclidean distance L: {fne(l1[0])}", f"{fne(l2[0])}")
+    data_line(f"                   a: {fne(l1[1])}", f"{fne(l2[1])}")
+    data_line(f"                   b: {fne(l1[2])}", f"{fne(l2[2])}")
+    data_line(f"    Average distance: {fne(al1)}"  , f"{fne(al2)}"  )
+
+    # MDE
+    data_line("", "")
+    data_line(f"      Normalized MDE: {fne(m1)}"   , f"{fne(m2)}"   )
     
+    # SSIM
+    if "ssim" in r1 or "ms_ssim" in r1:
+        vert_separator("SSIM")
+    if "ssim" in r1:
+        data_line(f"                SSIM: {fne(s1)}", f"{fne(s2)}")
+    if "ms_ssim" in r1:
+        data_line(f"             MS-SSIM: {fne(ms1)}", f"{fne(ms2)}")
+
+    print("="*TOTAL_WIDTH)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Calculate various distance metrics between images.")
+    parser.add_argument("image", nargs='+', help="Path to image. Use 2 for direct comparison, or 3 to compare a reference (1st) against two others (2nd, 3rd).")
+    parser.add_argument("-s", "--ssim", action="store_true", help="Also calculate the SSIM index.")
+    parser.add_argument("-m", "--ms_ssim", action="store_true", help="Also calculate the MS-SSIM index.")
+    parser.add_argument("-g", "--gpu", action="store_true", help="Enable GPU for PyTorch calculations.")
     args = parser.parse_args()
 
-    # Run the main function, passing the flags
-    results = compute_diffs(args.picture1, args.picture2, compute_ssim=args.ssim, compute_ms_ssim=args.ms_ssim, use_gpu=args.gpu)
+    num_images = len(args.image)
+    needs_tensors = args.ssim or args.ms_ssim
+    device = torch.device('cuda' if args.gpu and torch.cuda.is_available() else 'cpu')
 
-    # Check if the result is a dictionary (success)
-    if isinstance(results, dict):
-        print(f"\nImages size: {results['size']}")
+    try:
+        if num_images in (2, 3):
+            ref_pack = preprocess_image(args.image[0], needs_tensors, device)
+            comp1_pack = preprocess_image(args.image[1], needs_tensors, device)
+            if ref_pack["size"] != comp1_pack["size"]: raise ValueError("Pictures must have the same size.")
+            results1 = compare_images(ref_pack, comp1_pack, args.ssim, args.ms_ssim)
+        else:
+            print(f"Error: Requires 2 or 3 image paths, but {num_images} were provided.", file=sys.stderr)
+            sys.exit(1)
 
-        # Print YcbCr Euclidean norm results
-        norms = results["ycbcr"]
-        print( "\n----------- YCbCr ------------")
-        print(f"Euclidean distance Y: {norms[0]:.6f}")
-        print(f"                  Cb: {norms[1]:.6f}")
-        print(f"                  Cr: {norms[2]:.6f}")
-        print(f"    Average distance: {sum(norms)/3:.6f}")
+        if num_images == 2:
+            headers = (f"'{ref_pack['filename']}'", f"vs '{comp1_pack['filename']}'", "")
+            print_comparison_columns(results1, None, headers)
+        elif num_images == 3:
+            comp2_pack = preprocess_image(args.image[2], needs_tensors, device)
+            if ref_pack["size"] != comp2_pack["size"]: raise ValueError("Pictures must have the same size.")
+            results2 = compare_images(ref_pack, comp2_pack, args.ssim, args.ms_ssim)
+            headers = (f"'{ref_pack['filename']}'", f"vs '{comp1_pack['filename']}'", f"vs '{comp2_pack['filename']}'")
+            print_comparison_columns(results1, results2, headers)
 
-        # Print HSV Euclidean norm results
-        norms = results["hsv"]
-        print( "\n------------ HSV -------------")
-        print(f"Euclidean distance V: {norms[2]:.6f}")
-        print(f"                   S: {norms[1]:.6f}")
-        print(f"                   H: {norms[0]:.6f}")
-        print(f"    Average distance: {sum(norms)/3:.6f}")
 
-        # Print LAB Euclidean norm results
-        print( "\n------------ LAB -------------")
-        norms = results["lab"]
-        print(f"Euclidean distance L: {norms[0]:.6f}")
-        print(f"                   a: {norms[1]:.6f}")
-        print(f"                   b: {norms[2]:.6f}")
-        print(f"    Average distance: {sum(norms)/3:.6f}")
+    except FileNotFoundError as e:
+        print(f"Error: File not found -> {e.filename}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print("Unexpected error occurred:", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        sys.exit(1)
 
-        # Print normalized MDE results
-        mde = results["mde"]
-        print(f"\n      Normalized MDE: {mde:.6f}")
-
-        # Conditional print of optional results
-        if "ssim" in results or "ms_ssim" in results:
-            print("\n----------------------- SSIM ------------------------")
-        if "ssim" in results:
-            print(f"               Structural Similarity (SSIM): {results['ssim']:.6f}")
-        if "ms_ssim" in results:
-            print(f"Multi-Scale Structural Similarity (MS-SSIM): {results['ms_ssim']:.6f}")
-
-    else:
-        # Print error
-        print(results)
