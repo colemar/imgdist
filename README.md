@@ -30,7 +30,7 @@ Windows:
 py imgdist.py [image1] [image2] [options]
 ```
 
-Or set file extension association once and for all for Windows:
+Or set file extension association once and for all in Windows:
 
 ```batch
 assoc .py=Python.File
