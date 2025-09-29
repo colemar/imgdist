@@ -95,65 +95,66 @@ def print_comparison_columns(r1, r2, headers):
         TOTAL_WIDTH = COL_WIDTH
         y2, h2, l2, m2, s2, ms2, ay2, ah2, al2 = ([None,None,None],) * 3 + (None,) * 6
 
-    def fne(v):
-        """If v is a number return it as formatted string, else return empty string"""
-        if isinstance(v, (int, float)):
-            return format(v, '.6f')
-        return ""
-
-    def vert_separator(label):
+    def separator_line(label):
         label = f" {label} "
         left, r = divmod(TOTAL_WIDTH - len(label), 2)
         right = left + r
         print("-"*left + label + "-"*right)
-        
-    def data_line(left_str, right_str):
-        print(f"{left_str:<{COL_WIDTH}}{SEPARATOR}{right_str}")
+
+    def data_line(prefix, num1, num2):
+        GREEN = "\033[92m" # light green
+        RESET = "\033[0m"  # color reset
+
+        str1 = f"{num1:.6f}" if isinstance(num1, (int, float)) else " " * 8
+        str2 = f"{num2:.6f}" if isinstance(num2, (int, float)) else " " * 8
+
+        if isinstance(num1, (int, float)) and isinstance(num2, (int, float)):
+            if (num1 > num2) == ('SSIM' in prefix):
+                str1 = f"{GREEN}{str1}{RESET}"
+            else:
+                str2 = f"{GREEN}{str2}{RESET}"
+
+        print(f"{prefix}{str1}{SEPARATOR}{str2}")
 
     ref_header, hd1, hd2 = headers
     print("\n" + f"Ref: {ref_header} {r1['size']}".center(TOTAL_WIDTH))
     print("="*TOTAL_WIDTH)
     print(f"{hd1.center(COL_WIDTH)}{SEPARATOR}{hd2.center(COL_WIDTH)}")
 
-    # YCbCr
-    vert_separator("YCbCr")
-    data_line(f"Euclidean distance Y: {fne(y1[0])}", f"{fne(y2[0])}")
-    data_line(f"                  Cb: {fne(y1[1])}", f"{fne(y2[1])}")
-    data_line(f"                  Cr: {fne(y1[2])}", f"{fne(y2[2])}")
-    data_line(f"    Average distance: {fne(ay1)}",   f"{fne(ay2)}"  )
+    separator_line("YCbCr")
+    data_line("Euclidean distance Y: ", y1[0], y2[0])
+    data_line("                  Cb: ", y1[1], y2[1])
+    data_line("                  Cr: ", y1[2], y2[2])
+    data_line("    Average distance: ", ay1  , ay2  )
 
-    # HSV
-    vert_separator("HSV")
-    data_line(f"Euclidean distance V: {fne(h1[2])}", f"{fne(h2[2])}")
-    data_line(f"                   S: {fne(h1[1])}", f"{fne(h2[1])}")
-    data_line(f"                   H: {fne(h1[0])}", f"{fne(h2[0])}")
-    data_line(f"    Average distance: {fne(ah1)}",   f"{fne(ah2)}"  )
+    separator_line("HSV")
+    data_line("Euclidean distance V: ", h1[2], h2[2])
+    data_line("                   S: ", h1[1], h2[1])
+    data_line("                   H: ", h1[0], h2[0])
+    data_line("    Average distance: ", ah1  , ah2  )
 
-    # LAB
-    vert_separator("LAB")
-    data_line(f"Euclidean distance L: {fne(l1[0])}", f"{fne(l2[0])}")
-    data_line(f"                   a: {fne(l1[1])}", f"{fne(l2[1])}")
-    data_line(f"                   b: {fne(l1[2])}", f"{fne(l2[2])}")
-    data_line(f"    Average distance: {fne(al1)}"  , f"{fne(al2)}"  )
+    separator_line("LAB")
+    data_line("Euclidean distance L: ", l1[0], l2[0])
+    data_line("                   a: ", l1[1], l2[1])
+    data_line("                   b: ", l1[2], l2[2])
+    data_line("    Average distance: ", al1  , al2  )
 
-    # MDE
-    data_line("", "")
-    data_line(f"      Normalized MDE: {fne(m1)}"   , f"{fne(m2)}"   )
-    
-    # SSIM
+    data_line("                      ", None, None)
+    data_line("      Normalized MDE: ", m1   , m2   )
+
     if "ssim" in r1 or "ms_ssim" in r1:
-        vert_separator("SSIM")
+        separator_line("SSIM")
     if "ssim" in r1:
-        data_line(f"                SSIM: {fne(s1)}", f"{fne(s2)}")
+        data_line("                SSIM: ", s1 , s2 )
     if "ms_ssim" in r1:
-        data_line(f"             MS-SSIM: {fne(ms1)}", f"{fne(ms2)}")
+        data_line("             MS-SSIM: ", ms1, ms2)
 
     print("="*TOTAL_WIDTH)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Calculate various distance metrics between images.")
-    parser.add_argument("image", nargs='+', help="Path to image. Use 2 for direct comparison, or 3 to compare a reference (1st) against two others (2nd, 3rd).")
+    parser.add_argument("image", nargs='+', help=f"Path to image. 1st: reference, 2nd and 3rd: compared against 1st. 3rd is optional.")
     parser.add_argument("-s", "--ssim", action="store_true", help="Also calculate the SSIM index.")
     parser.add_argument("-m", "--ms_ssim", action="store_true", help="Also calculate the MS-SSIM index.")
     parser.add_argument("-g", "--gpu", action="store_true", help="Enable GPU for PyTorch calculations.")
