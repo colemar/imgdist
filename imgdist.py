@@ -3,6 +3,7 @@
 import traceback
 import sys
 from PIL import Image
+from pillow_heif import HeifImagePlugin
 import numpy as np
 import torch
 from pytorch_msssim import ssim, ms_ssim
@@ -35,49 +36,46 @@ def compare_images(pack1, pack2, compute_ssim=False, compute_ms_ssim=False):
     """
     Calculates difference metrics between two preprocessed image data packs.
     """
-    try:
-        width, height = pack1["size"]
-        pixel_count = width * height
-        results = {"size": f"{width} x {height}"}
+    width, height = pack1["size"]
+    pixel_count = width * height
+    results = {"size": f"{width} x {height}"}
 
-        # --- YCbCr NORM ---
-        diff = pack1["ycbcr_arr"] - pack2["ycbcr_arr"]
-        norms = np.linalg.norm(diff, axis=(0, 1))
-        max_diffs = np.array([219.0, 224.0, 224.0], dtype=np.float64)
-        max_norms = np.sqrt(pixel_count) * max_diffs
-        results["ycbcr"] = norms / max_norms
+    # --- YCbCr NORM ---
+    diff = pack1["ycbcr_arr"] - pack2["ycbcr_arr"]
+    norms = np.linalg.norm(diff, axis=(0, 1))
+    max_diffs = np.array([219.0, 224.0, 224.0], dtype=np.float64)
+    max_norms = np.sqrt(pixel_count) * max_diffs
+    results["ycbcr"] = norms / max_norms
 
-        # --- HSV NORM ---
-        diff = np.abs(pack1["hsv_arr"] - pack2["hsv_arr"])
-        # Specific correction for the H channel (Hue, index 0), which is circular.
-        diff[..., 0] = np.minimum(diff[..., 0], 255 - diff[..., 0])
-        norms = np.linalg.norm(diff, axis=(0, 1))
-        max_diffs = np.array([127.5, 255.0, 255.0], dtype=np.float64)
-        max_norms = np.sqrt(pixel_count) * max_diffs
-        results["hsv"] = norms / max_norms
+    # --- HSV NORM ---
+    diff = np.abs(pack1["hsv_arr"] - pack2["hsv_arr"])
+    # Specific correction for the H channel (Hue, index 0), which is circular.
+    diff[..., 0] = np.minimum(diff[..., 0], 255 - diff[..., 0])
+    norms = np.linalg.norm(diff, axis=(0, 1))
+    max_diffs = np.array([127.5, 255.0, 255.0], dtype=np.float64)
+    max_norms = np.sqrt(pixel_count) * max_diffs
+    results["hsv"] = norms / max_norms
 
-        # --- LAB NORM & MDE ---
-        diff_lab = pack1["lab_arr"] - pack2["lab_arr"]
-        norms = np.linalg.norm(diff_lab, axis=(0, 1))
-        max_diffs = np.array([255.0, 255.0, 255.0], dtype=np.float64)
-        max_norms = np.sqrt(pixel_count) * max_diffs
-        results["lab"] = norms / max_norms
+    # --- LAB NORM & MDE ---
+    diff_lab = pack1["lab_arr"] - pack2["lab_arr"]
+    norms = np.linalg.norm(diff_lab, axis=(0, 1))
+    max_diffs = np.array([255.0, 255.0, 255.0], dtype=np.float64)
+    max_norms = np.sqrt(pixel_count) * max_diffs
+    results["lab"] = norms / max_norms
 
-        pixel_delta_e = np.linalg.norm(diff_lab, axis=2)
-        mean_delta_e = np.mean(pixel_delta_e)
-        max_delta_e = 255.0 * np.sqrt(3)
-        results["mde"] = mean_delta_e / max_delta_e
+    pixel_delta_e = np.linalg.norm(diff_lab, axis=2)
+    mean_delta_e = np.mean(pixel_delta_e)
+    max_delta_e = 255.0 * np.sqrt(3)
+    results["mde"] = mean_delta_e / max_delta_e
 
-        # --- SSIM & MS-SSIM ---
-        # Calculate score (the result is a tensor, we use .item() to extract the value)
-        if compute_ssim:
-            results["ssim"] = ssim(pack1["tensor"], pack2["tensor"], data_range=1.0).item()
-        if compute_ms_ssim:
-            results["ms_ssim"] = ms_ssim(pack1["tensor"], pack2["tensor"], data_range=1.0).item()
+    # --- SSIM & MS-SSIM ---
+    if compute_ssim:
+        results["ssim"] = ssim(pack1["tensor"], pack2["tensor"], data_range=1.0).item()
+    if compute_ms_ssim:
+        results["ms_ssim"] = ms_ssim(pack1["tensor"], pack2["tensor"], data_range=1.0).item()
 
-        return results
-    except Exception as e:
-        return f"Error during calculation: {e}"
+    return results
+
 
 def print_comparison_columns(r1, r2, headers):
     """Prints two result dictionaries in a side-by-side column format."""
@@ -151,6 +149,34 @@ def print_comparison_columns(r1, r2, headers):
 
     print("="*TOTAL_WIDTH)
 
+def run_analysis(device, args):
+    """ Funzione che esegue l'intera analisi con un device specifico. """
+    num_images = len(args.image)
+    needs_tensors = args.ssim or args.ms_ssim
+
+    if num_images in (2, 3):
+        # --- MODIFICA #1: Il messaggio sul device viene stampato solo se necessario. ---
+        if needs_tensors:
+            print(f"Using device: {device}", file=sys.stderr)
+            
+        ref_pack = preprocess_image(args.image[0], needs_tensors, device)
+        comp1_pack = preprocess_image(args.image[1], needs_tensors, device)
+        if ref_pack["size"] != comp1_pack["size"]: raise ValueError("Pictures must have the same size.")
+        results1 = compare_images(ref_pack, comp1_pack, args.ssim, args.ms_ssim)
+    else:
+        print(f"Error: Requires 2 or 3 image paths, but {num_images} were provided.", file=sys.stderr)
+        sys.exit(1)
+
+    if num_images == 2:
+        headers = (f"'{ref_pack['filename']}'", f"vs '{comp1_pack['filename']}'", "")
+        print_comparison_columns(results1, None, headers)
+    elif num_images == 3:
+        comp2_pack = preprocess_image(args.image[2], needs_tensors, device)
+        if ref_pack["size"] != comp2_pack["size"]: raise ValueError("Pictures must have the same size.")
+        results2 = compare_images(ref_pack, comp2_pack, args.ssim, args.ms_ssim)
+        headers = (f"'{ref_pack['filename']}'", f"vs '{comp1_pack['filename']}'", f"vs '{comp2_pack['filename']}'")
+        print_comparison_columns(results1, results2, headers)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Calculate various distance metrics between images.")
@@ -160,36 +186,31 @@ if __name__ == "__main__":
     parser.add_argument("-g", "--gpu", action="store_true", help="Enable GPU for PyTorch calculations.")
     args = parser.parse_args()
 
-    num_images = len(args.image)
     needs_tensors = args.ssim or args.ms_ssim
-    device = torch.device('cuda' if args.gpu and torch.cuda.is_available() else 'cpu')
+    
+    initial_device = torch.device('cpu')
+    if args.gpu:
+        if torch.cuda.is_available():
+            initial_device = torch.device('cuda')
+        else:
+            # --- MODIFICA #2: Il warning viene stampato solo se necessario. ---
+            if needs_tensors:
+                print("Warning: GPU requested (-g), but no CUDA device is available. Using CPU.", file=sys.stderr)
 
     try:
-        if num_images in (2, 3):
-            ref_pack = preprocess_image(args.image[0], needs_tensors, device)
-            comp1_pack = preprocess_image(args.image[1], needs_tensors, device)
-            if ref_pack["size"] != comp1_pack["size"]: raise ValueError("Pictures must have the same size.")
-            results1 = compare_images(ref_pack, comp1_pack, args.ssim, args.ms_ssim)
-        else:
-            print(f"Error: Requires 2 or 3 image paths, but {num_images} were provided.", file=sys.stderr)
-            sys.exit(1)
-
-        if num_images == 2:
-            headers = (f"'{ref_pack['filename']}'", f"vs '{comp1_pack['filename']}'", "")
-            print_comparison_columns(results1, None, headers)
-        elif num_images == 3:
-            comp2_pack = preprocess_image(args.image[2], needs_tensors, device)
-            if ref_pack["size"] != comp2_pack["size"]: raise ValueError("Pictures must have the same size.")
-            results2 = compare_images(ref_pack, comp2_pack, args.ssim, args.ms_ssim)
-            headers = (f"'{ref_pack['filename']}'", f"vs '{comp1_pack['filename']}'", f"vs '{comp2_pack['filename']}'")
-            print_comparison_columns(results1, results2, headers)
-
-
-    except FileNotFoundError as e:
-        print(f"Error: File not found -> {e.filename}", file=sys.stderr)
-        sys.exit(1)
+        run_analysis(initial_device, args)
     except Exception as e:
-        print("Unexpected error occurred:", file=sys.stderr)
-        traceback.print_exc(file=sys.stderr)
-        sys.exit(1)
-
+        if 'cuda' in str(e).lower() and initial_device.type == 'cuda':
+            print("\nWarning: An error occurred while using the GPU. Falling back to CPU.", file=sys.stderr)
+            print("\n--- Retrying on CPU ---", file=sys.stderr)
+            cpu_device = torch.device('cpu')
+            try:
+                run_analysis(cpu_device, args)
+            except Exception as final_e:
+                print("\nError: The analysis failed even after falling back to CPU.", file=sys.stderr)
+                traceback.print_exc(file=sys.stderr)
+                sys.exit(1)
+        else:
+            print("\nUnexpected error occurred:", file=sys.stderr)
+            traceback.print_exc(file=sys.stderr)
+            sys.exit(1)
