@@ -2,13 +2,14 @@
 
 import traceback
 import sys
+import argparse
+import os
 from PIL import Image
 from pillow_heif import HeifImagePlugin
+import pillow_jxl
 import numpy as np
 import torch
 from pytorch_msssim import ssim, ms_ssim
-import argparse
-import os
 
 def preprocess_image(image_path, needs_tensors=False, device=torch.device('cpu')):
     """
@@ -158,7 +159,7 @@ def run_analysis(device, args):
         # --- MODIFICA #1: Il messaggio sul device viene stampato solo se necessario. ---
         if needs_tensors:
             print(f"Using device: {device}", file=sys.stderr)
-            
+
         ref_pack = preprocess_image(args.image[0], needs_tensors, device)
         comp1_pack = preprocess_image(args.image[1], needs_tensors, device)
         if ref_pack["size"] != comp1_pack["size"]: raise ValueError("Pictures must have the same size.")
@@ -187,7 +188,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     needs_tensors = args.ssim or args.ms_ssim
-    
+
     initial_device = torch.device('cpu')
     if args.gpu:
         if torch.cuda.is_available():
