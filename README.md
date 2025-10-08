@@ -1,4 +1,4 @@
-# Image Distance Metrics (imgdist)
+# Image Distance (imgdist)
 
 A command-line tool to calculate and compare various perceptual distance metrics between images.
 
@@ -51,19 +51,19 @@ This will display both comparisons in a convenient two-column layout, with the b
 
 * `-s`, `--ssim`: Calculate SSIM score
 * `-m`, `--ms_ssim`: Calculate MS-SSIM score
-* `-g`, `--gpu`: Use GPU for SSIM/MS-SSIM calculations (requires CUDA-enabled PyTorch)
+* `-g`, `--gpu`: Use GPU for SSIM/MS-SSIM calculations (can use CUDA-enabled PyTorch)
 
 ### Examples
 
 ```bash
 # Basic comparison with default metrics
-./imgdist.py original.png compressed.png
+./imgdist.py original.png compressed.jpg
 
 # Include SSIM and MS-SSIM
-./imgdist.py original.png compressed.png -s -m
+./imgdist.py original.png compressed.jpg -s -m
 
 # Compare two compression methods against original with GPU acceleration
-./imgdist.py original.png method1.png method2.png -s -m -g
+./imgdist.py original.png method1.jpg method2.avif -s -m -g
 ```
 
 ## Windows Setup (Optional)
@@ -78,7 +78,7 @@ ftype Python.File="C:\WINDOWS\py.exe" "%L" %*
 Then you can run:
 
 ```batch
-imgdist.py [image1] [image2] [options]
+imgdist.py [options] [image1] [image2]
 ```
 
 ## Output Format
@@ -89,7 +89,7 @@ The script displays results in an easy-to-read format:
 - **Color-coded results**: better values highlighted in green
 - **Organized by color space** with clear separators
 - **Average distances** computed for each color space
-- Image dimensions displayed in the header
+- **Image dimensions** displayed in the header
 
 ### Understanding the metrics
 
@@ -98,14 +98,14 @@ The script displays results in an easy-to-read format:
 - **0 = identical images**, **1 = maximum possible difference**
 - Lower is better (more similar images)
 
+The normalization of distance metrics allows for meaningful comparison across different color spaces and image sizes.
+
 **Similarity metrics** (SSIM, MS-SSIM) have a theoretical range of **-1 to 1**:
 
 - **1 = identical images** (perfect similarity)
 - **0 = no similarity**
 - **-1 = perfect anti-correlation** (inverted images)
 - Higher is better. In practice with real images, values are typically in the 0-1 range.
-
-The normalization of distance metrics allows for meaningful comparison across different color spaces and image sizes.
 
 ## Prerequisites
 
@@ -133,10 +133,10 @@ PyTorch installation depends on your system and CUDA support. Use the official c
 pip3 install torch torchvision
 ```
 
-**With CUDA support (e.g., NVIDIA GTX 1080 Ti with CUDA 12.x):**
+**With CUDA support (e.g., NVIDIA GTX 1080 Ti with CUDA 12.6):**
 
 ```bash
-pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu126
 ```
 
 **Note:** Check your CUDA version with `nvidia-smi` and select the appropriate PyTorch build from the official website.
@@ -145,7 +145,7 @@ pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu12
 
 - **Same dimensions**: All compared images must have identical dimensions (width × height)
 - **RGB images**: Images are converted to RGB internally
-- **Supported formats**: Any format supported by PIL/Pillow (JPEG, PNG, BMP, TIFF, WebP, etc.)
+- **Supported formats**: Any format supported by PIL/Pillow (JPEG, PNG, BMP, TIFF, WebP, JPEG 2000 etc.). You can do `pip3 install pillow_heif` to support HEIC and `pip3 install pillow-jxl-plugin` to support JXL.
 
 ## Technical Details
 
@@ -155,16 +155,15 @@ pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu12
 - **HSV**: Applies circular distance for Hue channel (accounts for 0°/360° wrap-around)
 - **LAB**: Uses PIL's LAB representation (0-255 scaled from CIE L\*a\*b\*)
 
-### SSIM Calculation
+### SSIM/MS-SSIM Calculation
 
 - Computed on grayscale (luminance) channel as per standard definition
 - GPU acceleration available with `-g` flag
 
 ### Performance Tips
 
-- Use `-g` flag with CUDA-enabled GPU for faster SSIM/MS-SSIM on large images
-- Images are preprocessed once and reused for all metrics
-- For batch comparisons, consider scripting multiple invocations
+- Use `-g` flag with a CUDA-enabled GPU for faster SSIM/MS-SSIM on large images
+- Images are preprocessed once per execution and reused for all metrics
 
 ## License
 
